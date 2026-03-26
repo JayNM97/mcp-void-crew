@@ -69,23 +69,44 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   throw new Error('Tool nicht gefunden');
 });
 
-// --- HIER IST DIE WICHTIGE ÄNDERUNG FÜR COPILOT STUDIO ---
-let transport;
+// --- BULLETPROOF MCP CONNECTION MANAGER ---
+const activeSessions = new Map();
 
-// 1. Wir lauschen auf GET (für den Verbindungsaufbau)
+// 1. Copilot baut die Verbindung auf
 app.get('/sse', async (req, res) => {
-  transport = new SSEServerTransport('/sse', res); // Copilot soll an /sse antworten
+  const sessionId = Math.random().toString(36).substring(7);
+  
+  // Wir sagen Copilot, er soll mit Session-ID an /message antworten
+  const transport = new SSEServerTransport(`/message?sessionId=${sessionId}`, res);
+  activeSessions.set(sessionId, transport);
+
+  // Wenn Copilot die Verbindung schließt, räumen wir auf
+  req.on('close', () => {
+    activeSessions.delete(sessionId);
+  });
+
   await server.connect(transport);
 });
 
-// 2. Wir lauschen auf POST (für die Werkzeug-Befehle von Copilot)
-app.post('/sse', async (req, res) => {
+// 2. Copilot schickt einen Werkzeug-Befehl (Wir fangen alles ab!)
+const handlePost = async (req, res) => {
+  const sessionId = req.query.sessionId;
+  
+  // Wenn Copilot die ID mitschickt, nehmen wir diese. 
+  // Wenn MS wieder stur ist und keine ID schickt, nehmen wir einfach die zuletzt aktive Session!
+  const transport = sessionId ? activeSessions.get(sessionId) : Array.from(activeSessions.values()).pop();
+
   if (transport) {
     await transport.handlePostMessage(req, res);
   } else {
-    res.status(400).send("Keine aktive Verbindung");
+    // 503 signalisiert Copilot Studio: "Verbindung war weg, bitte erst neu aufbauen (GET)!"
+    res.status(503).send("Verbindung unterbrochen. Bitte neu verbinden.");
   }
-});
+};
+
+// Wir lauschen auf beide Türen, egal welche Copilot nutzt
+app.post('/message', handlePost);
+app.post('/sse', handlePost);
 // ---------------------------------------------------------
 
 const PORT = process.env.PORT || 3000;

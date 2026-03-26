@@ -1,0 +1,11 @@
+{
+  "name": "mcp-void-crew",
+  "type": "module",
+  "dependencies": {
+    "express": "^4.19.0",
+    "@modelcontextprotocol/sdk": "latest"
+  },
+  "scripts": {
+    "start": "node index.js"
+  }
+}

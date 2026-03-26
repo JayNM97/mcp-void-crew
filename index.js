@@ -7,7 +7,7 @@ const app = express();
 app.use(express.json());
 
 const server = new Server(
-  { name: 'void-crew-search-server', version: '3.0.0' },
+  { name: 'void-crew-search-server', version: '4.0.0' },
   { capabilities: { tools: {} } }
 );
 
@@ -69,15 +69,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   throw new Error('Tool nicht gefunden');
 });
 
-// --- DER OFFIZIELLE SESSION MANAGER ---
+// --- WIR GEBEN NACH: ALLES LÄUFT ÜBER /mcp ---
 const sessions = new Map();
 
-// ACHTUNG: Wir nutzen jetzt /mcp statt /sse, um den Cache von Microsoft zu umgehen!
+// 1. Copilot baut die Verbindung auf (GET)
 app.get('/mcp', async (req, res) => {
-  const transport = new SSEServerTransport('/mcp-message', res);
+  // Wir sagen ihm: "Schick deine Antworten an /mcp"
+  const transport = new SSEServerTransport('/mcp', res);
   await server.connect(transport);
   
-  // Das SDK generiert automatisch eine saubere ID. Die nutzen wir!
   sessions.set(transport.sessionId, transport);
 
   req.on('close', () => {
@@ -85,13 +85,15 @@ app.get('/mcp', async (req, res) => {
   });
 });
 
-// Hier nimmt der Server die Werkzeug-Befehle an
-app.post('/mcp-message', async (req, res) => {
+// 2. Copilot schickt stur seine Befehle (POST) an dieselbe Adresse
+app.post('/mcp', async (req, res) => {
   const sessionId = req.query.sessionId;
-  const transport = sessions.get(sessionId);
+  
+  // Wenn Copilot die Session-ID "vergisst", schnappen wir uns einfach die letzte aktive Verbindung
+  const transport = sessionId ? sessions.get(sessionId) : Array.from(sessions.values()).pop();
 
   if (!transport) {
-    return res.status(404).send("Session abgelaufen.");
+    return res.status(404).send("Keine aktive Session gefunden.");
   }
 
   await transport.handlePostMessage(req, res);
@@ -99,5 +101,5 @@ app.post('/mcp-message', async (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`Server laeuft stabil!`);
+  console.log(`Server laeuft - und ist jetzt kugelsicher gegen Copilot Studio!`);
 });

@@ -7,7 +7,7 @@ const app = express();
 app.use(express.json());
 
 const server = new Server(
-  { name: 'void-crew-search-server', version: '2.0.0' },
+  { name: 'void-crew-search-server', version: '3.0.0' },
   { capabilities: { tools: {} } }
 );
 
@@ -18,7 +18,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       description: 'Durchsucht das offizielle Void Crew Wiki (wiki.gg) nach einem Begriff und liefert den Text des besten Artikels.',
       inputSchema: {
         type: 'object',
-        properties: { query: { type: 'string', description: 'Der Suchbegriff, z.B. "Engineer" oder "Bugs"' } },
+        properties: { query: { type: 'string', description: 'Der Suchbegriff' } },
         required: ['query']
       }
     },
@@ -69,24 +69,35 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   throw new Error('Tool nicht gefunden');
 });
 
-// --- DIE FINALE, GLOBALE STANDLEITUNG ---
-let globalTransport;
+// --- DER OFFIZIELLE SESSION MANAGER ---
+const sessions = new Map();
 
-app.get('/sse', async (req, res) => {
-  globalTransport = new SSEServerTransport('/sse', res);
-  await server.connect(globalTransport);
+// ACHTUNG: Wir nutzen jetzt /mcp statt /sse, um den Cache von Microsoft zu umgehen!
+app.get('/mcp', async (req, res) => {
+  const transport = new SSEServerTransport('/mcp-message', res);
+  await server.connect(transport);
+  
+  // Das SDK generiert automatisch eine saubere ID. Die nutzen wir!
+  sessions.set(transport.sessionId, transport);
+
+  req.on('close', () => {
+    sessions.delete(transport.sessionId);
+  });
 });
 
-app.post('/sse', async (req, res) => {
-  if (globalTransport) {
-    await globalTransport.handlePostMessage(req, res);
-  } else {
-    // Wenn dieser Fehler kommt, muss Copilot Studio die Verbindung neu aufbauen
-    res.status(503).send("Bitte die Aktion in Copilot Studio einmal loeschen und neu anlegen.");
+// Hier nimmt der Server die Werkzeug-Befehle an
+app.post('/mcp-message', async (req, res) => {
+  const sessionId = req.query.sessionId;
+  const transport = sessions.get(sessionId);
+
+  if (!transport) {
+    return res.status(404).send("Session abgelaufen.");
   }
+
+  await transport.handlePostMessage(req, res);
 });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`Such-Server laeuft!`);
+  console.log(`Server laeuft stabil!`);
 });

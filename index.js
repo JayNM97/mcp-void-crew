@@ -11,7 +11,6 @@ const server = new Server(
   { capabilities: { tools: {} } }
 );
 
-// 1. Wir definieren unsere neuen Such-Werkzeuge
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: [
     {
@@ -35,10 +34,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
   ]
 }));
 
-// 2. Die Logik: Was passiert, wenn der Bot sucht?
 async function searchWiki(baseUrl, query) {
   try {
-    // A. Suche nach dem Begriff
     const searchRes = await fetch(`${baseUrl}/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&format=json`);
     const searchData = await searchRes.json();
 
@@ -46,10 +43,7 @@ async function searchWiki(baseUrl, query) {
       return `Keine Ergebnisse für "${query}" gefunden.`;
     }
 
-    // B. Nimm den Titel des besten Treffers
     const bestMatchTitle = searchData.query.search[0].title;
-
-    // C. Hole den reinen Text dieses Artikels (ohne HTML!)
     const articleRes = await fetch(`${baseUrl}/api.php?action=query&prop=extracts&explaintext=1&titles=${encodeURIComponent(bestMatchTitle)}&format=json`);
     const articleData = await articleRes.json();
 
@@ -75,17 +69,24 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   throw new Error('Tool nicht gefunden');
 });
 
-// SSE Mantel für Copilot Studio (bleibt gleich)
+// --- HIER IST DIE WICHTIGE ÄNDERUNG FÜR COPILOT STUDIO ---
 let transport;
+
+// 1. Wir lauschen auf GET (für den Verbindungsaufbau)
 app.get('/sse', async (req, res) => {
-  transport = new SSEServerTransport('/message', res);
+  transport = new SSEServerTransport('/sse', res); // Copilot soll an /sse antworten
   await server.connect(transport);
 });
-app.post('/message', async (req, res) => {
+
+// 2. Wir lauschen auf POST (für die Werkzeug-Befehle von Copilot)
+app.post('/sse', async (req, res) => {
   if (transport) {
     await transport.handlePostMessage(req, res);
+  } else {
+    res.status(400).send("Keine aktive Verbindung");
   }
 });
+// ---------------------------------------------------------
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
